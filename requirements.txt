@@ -1,0 +1,41 @@
+# Core HTTP & Utilities
+requests>=2.27.1
+gdown>=3.10.1
+tqdm>=4.30.0
+fire>=0.4.0
+gunicorn>=20.1.0
+psutil
+
+# FastAPI
+fastapi==0.110.1
+uvicorn[standard]==0.29.0
+
+
+
+# Computer Vision
+opencv-python-headless>=4.9.0.80 # headless preferred in Docker
+Pillow>=9.0.0
+mtcnn>=0.1.0
+
+# Data processing
+numpy>=1.23.0
+pandas>=2.0.0
+scikit-learn>=1.0
+
+facenet_pytorch # Already compatible with torch 2.x
+
+# Auth / Security
+PyJWT[crypto]
+cryptography
+pymongo
+passlib==1.7.4
+faiss-gpu-cu12
+
+python-jose
+
+# Database
+pydantic==2.7.1
+
+
+onnxruntime
+insightface
