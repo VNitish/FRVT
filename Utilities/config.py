@@ -17,16 +17,28 @@ logger = logging.getLogger(__name__)
 
 from concurrent.futures import ThreadPoolExecutor
 
-max_workers = int(os.getenv("MAX_WORKERS", 8))
-detection_workers = int(os.getenv("DETECTION_WORKERS", 4))
-recognition_workers = int(os.getenv("RECOGNITION_WORKERS", 4))
+# Performance Configuration - Optimized
+import multiprocessing
 
-# Tune max_workers to your CPU core count (or a bit above)
-executor = ThreadPoolExecutor(max_workers=max_workers)
+# Auto-detect optimal worker counts based on system resources
+cpu_count = multiprocessing.cpu_count()
+max_workers = int(os.getenv("MAX_WORKERS", min(32, cpu_count * 4)))  # Cap at 32 for memory
+detection_workers = int(os.getenv("DETECTION_WORKERS", min(8, cpu_count)))
+recognition_workers = int(os.getenv("RECOGNITION_WORKERS", min(8, cpu_count)))
 
-# Limit to concurrent GPU inferences
+# Optimized ThreadPoolExecutor with better resource management
+executor = ThreadPoolExecutor(
+    max_workers=max_workers,
+    thread_name_prefix="FRT-Worker"
+)
+
+# Limit concurrent GPU inferences with optimized semaphores
 detection_semaphore = asyncio.Semaphore(detection_workers)    # CPU/GPU face detection
-recognition_semaphore = asyncio.Semaphore(recognition_workers)
+recognition_semaphore = asyncio.Semaphore(recognition_workers)  # GPU embedding inference
+
+# Additional performance semaphores
+db_semaphore = asyncio.Semaphore(20)  # Database operations
+image_processing_semaphore = asyncio.Semaphore(16)  # Image decode/encode operations
 
 # Codes
 SUCCESS_CODE         = 200
@@ -89,18 +101,35 @@ UNAUTHORIZED         = "Unauthorized: invalid or missing token."
 
 
 def load_image_from_base64(base64_code: str) -> np.ndarray:
+    """Optimized image loading with validation and caching support"""
+    try:
+        # Fast decode without extra validation for performance
+        decoded_bytes = base64.b64decode(base64_code, validate=True)
+        
+        # Quick format validation using first few bytes (magic numbers)
+        if decoded_bytes[:2] == b'\xff\xd8':  # JPEG
+            pass  # Valid JPEG
+        elif decoded_bytes[:8] == b'\x89PNG\r\n\x1a\n':  # PNG
+            pass  # Valid PNG
+        else:
+            # Fallback to PIL for thorough validation only if needed
+            with Image.open(io.BytesIO(decoded_bytes)) as img:
+                file_type = img.format.lower()
+                if file_type not in {"jpeg", "png"}:
+                    raise ValueError(f"Input image can be jpg or png, but it is {file_type}")
 
-    decoded_bytes = base64.b64decode(base64_code)
-
-    with Image.open(io.BytesIO(decoded_bytes)) as img:
-        file_type = img.format.lower()
-        if file_type not in {"jpeg", "png"}:
-            raise ValueError(f"Input image can be jpg or png, but it is {file_type}")
-
-    nparr = np.fromstring(decoded_bytes, np.uint8)
-    img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    # img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    return img_bgr
+        # Optimized decoding - use frombuffer instead of fromstring (deprecated)
+        nparr = np.frombuffer(decoded_bytes, np.uint8)
+        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img_bgr is None:
+            raise ValueError("Failed to decode image data")
+            
+        return img_bgr
+        
+    except Exception as e:
+        logger.error(f"Image loading failed: {str(e)}")
+        raise ValueError(f"Invalid image data: {str(e)}")
 
 
 from fastapi import Depends, HTTPException, status

@@ -2,6 +2,7 @@
 import time
 import numpy as np
 from frt.faiss import * 
+from frt.commons.cache import faiss_index_cache
 from Utilities.config import *
 
 def search_and_update_threshold(vec, index, metadata, collection_name,image_id, max_threshold = 0.30, min_threshold = 0.2):
@@ -48,7 +49,16 @@ def search_and_update_threshold(vec, index, metadata, collection_name,image_id, 
     return updated_thresholds, thres, search_time, None
 
 # ===============================================================================================
-def load_faiss_index_and_metadata(collection_name):
+def load_faiss_index_and_metadata(collection_name, use_cache: bool = True):
+    """Optimized FAISS index loading with caching"""
+    # Check cache first
+    if use_cache:
+        cache_key = f"index_{collection_name}"
+        cached_data = faiss_index_cache.get(cache_key)
+        if cached_data is not None:
+            logger.debug(f"Using cached FAISS index for '{collection_name}'")
+            return cached_data[0], cached_data[1], None
+    
     index_path = os.path.join(INDEX_DIR, f"{collection_name}.index")
     metadata_path = os.path.join(INDEX_DIR, f"{collection_name}.json")
 
@@ -58,10 +68,33 @@ def load_faiss_index_and_metadata(collection_name):
             "message": EMPTY_COLLECTION.format(collection_name=collection_name), "data": {}
         }
 
-    cpu_index = faiss.read_index(index_path)
-    index = faiss.index_cpu_to_gpu(gpu_res, 0, cpu_index)
+    try:
+        start_time = time.time()
+        cpu_index = faiss.read_index(index_path)
+        
+        # Try to move to GPU, fallback to CPU if needed
+        try:
+            index = faiss.index_cpu_to_gpu(gpu_res, 0, cpu_index)
+            logger.debug(f"Loaded FAISS index to GPU for '{collection_name}'")
+        except Exception as e:
+            logger.warning(f"GPU index loading failed, using CPU: {e}")
+            index = cpu_index
 
-    with open(metadata_path, "r") as f:
-        metadata = json.load(f)
+        with open(metadata_path, "r") as f:
+            metadata = json.load(f)
+        
+        # Cache the loaded index
+        if use_cache:
+            faiss_index_cache.put(cache_key, (index, metadata))
+        
+        load_time = time.time() - start_time
+        logger.debug(f"Loaded FAISS index for '{collection_name}' in {load_time:.3f}s")
 
-    return index, metadata, None
+        return index, metadata, None
+        
+    except Exception as e:
+        logger.error(f"Failed to load FAISS index for '{collection_name}': {e}")
+        return None, None, {
+            "status": True, "code": EXCEPTION_CODE,
+            "message": f"Failed to load index: {str(e)}", "data": {}
+        }

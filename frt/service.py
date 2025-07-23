@@ -34,8 +34,12 @@ async def verify_response(input_args):
         }
     
     threshold = float(input_args.get("threshold", 0.25))
-    img1 = await loop.run_in_executor(executor, load_image_from_base64, img1_base64)
-    img2 = await loop.run_in_executor(executor, load_image_from_base64, img2_base64)
+    
+    # Optimized parallel image loading with semaphore control
+    async with image_processing_semaphore:
+        img1_task = loop.run_in_executor(executor, load_image_from_base64, img1_base64)
+        img2_task = loop.run_in_executor(executor, load_image_from_base64, img2_base64)
+        img1, img2 = await asyncio.gather(img1_task, img2_task)
         # Extract parameters from the payload
 
     
@@ -277,10 +281,13 @@ async def add_image_response(input_args):
         return {"status": True, "code": ALREADY_EXISTS_CODE, "message": ID_ALREADY_EXISTS.format(id=image_id, collection_name=collection_name), "errorMessage": "", "data": {}}
 
     embedding_start_time = time.time()
-    img = await loop.run_in_executor(executor, load_image_from_base64, base64_image)
-    model_name=input_args.get("model_name", "adaface_scrfd")
-
-    vec = await get_embedding_scrfd_async(img)
+    
+    # Optimized image loading with semaphore control
+    async with image_processing_semaphore:
+        img = await loop.run_in_executor(executor, load_image_from_base64, base64_image)
+    
+    model_name = input_args.get("model_name", "adaface_scrfd")
+    vec = await get_embedding_scrfd_async(img, use_cache=True)  # Enable caching
     
     if vec is None or (hasattr(vec, 'size') and vec.size == 0):
         logger.warning("Failed to generate face embedding.")

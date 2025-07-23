@@ -8,18 +8,28 @@ from Utilities.config import *
 from frt.resnet100 import build_adaface
 from insightface.model_zoo.scrfd import SCRFD
 from insightface.utils.face_align import norm_crop
+from frt.commons.cache import embedding_cache, image_cache
+import base64
 
-# ───── GPU Setup ─────────────────────────────────────────────────
+# ───── Optimized GPU Setup ─────────────────────────────────────────────────
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
     try:
-        tf.config.experimental.set_memory_growth(gpus[0], True)
-        logger.info("GPU memory growth enabled.")
+        # Enhanced GPU memory configuration
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+            # Set virtual GPU memory limit to prevent OOM
+            tf.config.experimental.set_virtual_device_configuration(
+                gpu,
+                [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096)]  # 4GB limit
+            )
+        logger.info(f"GPU memory growth enabled for {len(gpus)} GPU(s).")
     except Exception as e:
-        logger.warning(f"Could not set memory growth: {e}")
+        logger.warning(f"Could not set GPU memory configuration: {e}")
 else:
     logger.warning("No GPU found. Running on CPU.")
 
+# Enhanced TensorFlow optimizations
 tf.config.optimizer.set_jit(True)  # Enable XLA (JIT)
 tf.config.optimizer.set_experimental_options({
     "layout_optimizer": True,
@@ -29,7 +39,9 @@ tf.config.optimizer.set_experimental_options({
     "dependency_optimization": True,
     "loop_optimization": True,
     "function_optimization": True,
-    "debug_stripper": True
+    "debug_stripper": True,
+    "scoped_allocator_optimization": True,  # Additional optimization
+    "pin_to_host_optimization": True,       # Additional optimization
 })
 
 os.environ["ORT_LOG_SEVERITY_LEVEL"] = "3"
@@ -93,16 +105,31 @@ async def detect_and_crop_face_async(image_bgr: np.ndarray) -> tf.Tensor | None:
         )
         
 # =========================================================================================
-async def get_embedding_scrfd_async(face_bgr: np.ndarray):
+async def get_embedding_scrfd_async(face_bgr: np.ndarray, use_cache: bool = True):
+    """Optimized embedding generation with caching support"""
     try:
+        # Generate cache key from image data
+        if use_cache:
+            image_bytes = cv2.imencode('.jpg', face_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])[1].tobytes()
+            cached_embedding = embedding_cache.get_embedding(image_bytes)
+            if cached_embedding is not None:
+                logger.debug("Using cached embedding")
+                return cached_embedding
+        
         face_rgb = await detect_and_crop_face_async(face_bgr)
         if face_rgb is None:
             return None
+            
         embedding = await adaface_infer_async(face_rgb)
+        
+        # Cache the result if enabled
+        if use_cache and embedding is not None:
+            embedding_cache.put_embedding(image_bytes, np.array(embedding))
+            
         return embedding
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
-        None
+        return None
 
 # =========================================================================================
 async def compare_embeddings_scrfd(image1_bgr, image2_bgr, threshold=0.4):
