@@ -292,12 +292,8 @@ async def add_image_response(input_args):
     index, metadata, response = load_faiss_index_and_metadata(collection_name)
     db_retrieval_time = time.time() - db_retrieval_start_time
 # -----------------------------------------------------------------------------
-    if force == "True": # for handling edge case like twins
-        updated_thresholds, thres, search_time, response = {}, float(0.3), 0, None
-    else:
-        updated_thresholds, thres, search_time, response = search_and_update_threshold(vec, index, metadata, collection_name, image_id)    
-        if updated_thresholds is None and thres is None and search_time is None:
-            return response
+    # Removed adaptive thresholding logic - images are added without threshold-based comparisons
+    updated_thresholds, thres, search_time = {}, float(0.3), 0
 # ------------------------------------------------------------------------------    
     # Save updated metadata
     index_path = os.path.join(INDEX_DIR, f"{collection_name}.index")
@@ -311,7 +307,6 @@ async def add_image_response(input_args):
         "id": image_id,
         "collection_name": collection_name,
         "embedding": vec.numpy().tolist(),  # Convert to list for MongoDB storage
-        "at_threshold": float(thres),
         "created_at": current_timestamp(),
         })
 
@@ -320,16 +315,10 @@ async def add_image_response(input_args):
     cpu_index = faiss.index_gpu_to_cpu(index)
     faiss.write_index(cpu_index, index_path)
 
-    # Update existing thresholds if needed
-    for meta in metadata:
-        if meta["id"] in updated_thresholds:
-            meta["at_threshold"] = updated_thresholds[meta["id"]]
-
     # Add new entry
     metadata.append({
         "id": image_id,
         "collection_name": collection_name,
-        "at_threshold": thres
     })
 
     with open(metadata_path, "w") as f:
@@ -344,11 +333,9 @@ async def add_image_response(input_args):
             "errorMessage": "", 
             "data": {"id": image_id,
                      "collection_name": collection_name,
-                     "threshold": thres,
                      "timing": {
                                  "embedding_time": round(embedding_time , 4),
                                  "DB_retrieval_time": round(db_retrieval_time, 4),
-                                 "search_time": round(search_time, 4),
                                  "index_update_time": round(index_update_time, 4),
                                  "total_time": round(time.time() - overall_start_time, 4),
                                  }
@@ -413,14 +400,15 @@ async def find_response(input_args):
     print("best_idx: ",best_idx)
 
     match = None
+    fixed_threshold = 0.3  # Fixed threshold since adaptive thresholding is removed
     if best_idx != -1 and best_score >= 0:
         if best_idx < len(metadata):
             meta = metadata[best_idx]
-            if best_score < meta["at_threshold"]:
+            if best_score < fixed_threshold:
                 match = {
                     "id": meta["id"],
                     "score": float(best_score),
-                    "threshold": meta["at_threshold"]
+                    "threshold": fixed_threshold
                 }
         else:
             logger.warning(f"Metadata missing for index {best_idx}. Possible deletion or desync.")

@@ -12,7 +12,7 @@ gpu_res = faiss.StandardGpuResources()   # Optional: Can be reused globally
 def build_faiss_index_for_collection(collection_name: str):
     docs = list(db.embeddings.find(
             {"collection_name": collection_name},
-            {"_id": 0, "id": 1, "embedding": 1, "collection_name": 1, "at_threshold": 1}
+            {"_id": 0, "id": 1, "embedding": 1, "collection_name": 1}
         ))
     if not docs:
         dim = 512
@@ -37,7 +37,6 @@ def build_faiss_index_for_collection(collection_name: str):
         {
             "id": doc["id"],
             "collection_name": doc["collection_name"],
-            "at_threshold": doc.get("at_threshold", 0.4)
         }
         for doc in docs
     ]

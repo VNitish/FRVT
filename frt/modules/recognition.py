@@ -25,11 +25,10 @@ def find(
         logger.info("Running find()...")
 
     # Preload data
-    ids, at_thresholds, emb_list = [], [], []
+    ids, emb_list = [], []
     for item in stored_embeddings:
         if item and "embedding" in item:
             ids.append(item["id"])
-            at_thresholds.append(item.get("at_threshold", threshold or 1.0))
             emb_list.append(item["embedding"])
 
     if len(emb_list) == 0:
@@ -70,10 +69,10 @@ def find(
             {
                 "id": ids[j],
                 "distance": float(dist),
-                "threshold": min(at_thresholds[j], threshold or 1.0)
+                "threshold": threshold or 1.0
             }
             for j, dist in enumerate(dists)
-            if dist <= min(at_thresholds[j], threshold or 1.0)
+            if dist <= (threshold or 1.0)
         ]
 
         query_results.sort(key=lambda x: x["distance"])
